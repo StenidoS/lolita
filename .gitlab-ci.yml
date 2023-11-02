@@ -1,0 +1,68 @@
+stages:
+    - build
+    - deploy
+
+cache:
+    paths:
+      - vendor/
+      - node_modules/
+
+project_build:
+    stage: build
+    only:
+        - master
+    script:
+        - pwd
+        - composer install
+        - npm install
+        - npm run build
+        - chmod 777 -R storage
+    artifacts:
+        paths:
+          - ./
+        expire_in: 10 mins
+
+
+test_deploy:
+    stage: deploy
+    only:
+        - master
+    variables:
+        HOST: "$TEST_APP_URL"
+        USER: "root"
+        PASSWORD: "p@yF94@qaXv3"
+        APP_PATH: "/var/www/landing"
+        BACKUP_PATH: "/var/www/backup"
+    script:
+        - export SSHPASS=$PASSWORD
+        - sshpass -e ssh $USER@$HOST -o stricthostkeychecking=no "
+            rm -rf $BACKUP_PATH/*
+            && cp -R $APP_PATH $BACKUP_PATH
+            "
+        - sshpass -e ssh $USER@$HOST -o stricthostkeychecking=no "
+            rm -rf $APP_PATH/*
+            "
+        - sshpass -e scp -o stricthostkeychecking=no -r * $USER@$HOST:$APP_PATH
+        - sshpass -e ssh $USER@$HOST -o stricthostkeychecking=no "
+            cd $APP_PATH
+            && rm -rf .env
+            && touch .env
+            && echo "APP_NAME=$TEST_APP_NAME" >> .env
+            && echo "APP_ENV=$TEST_APP_ENV" >> .env
+            && echo "APP_KEY=" >> .env
+            && echo "APP_DEBUG=false" >> .env
+            && echo "APP_URL=$TEST_APP_URL" >> .env
+            && echo "DB_CONNECTION=mysql" >> .env
+            && echo "DB_HOST=127.0.0.1" >> .env
+            && echo "DB_PORT=3306" >> .env
+            && echo "DB_DATABASE=laravel" >> .env
+            && echo "DB_USERNAME=laravel" >> .env
+            && echo "DB_PASSWORD=Password1!" >> .env
+            && php artisan key:generate
+            && cat .env
+            && chown -R www-data:www-data storage/
+            && php artisan migrate --force
+            && php artisan cache:clear
+            && php artisan config:cache
+            && php artisan route:cache
+            "
